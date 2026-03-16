@@ -5,10 +5,15 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.Properties;
+import org.json.JSONObject;
 
 public class LLMClient {
-    public static void main(String[] args) throws Exception{
-        //Load API key
+
+    // Gemini 2.5 Flash pricing per 1000 tokens
+    private static final double INPUT_COST_PER_1K = 0.00015;
+    private static final double OUTPUT_COST_PER_1K = 0.00060;
+
+    public static void main(String[] args) throws Exception {
         Properties properties = new Properties();
         properties.load(LLMClient.class.getResourceAsStream("/application.properties"));
         String apiKey = properties.getProperty("GEMINI_API_KEY");
@@ -33,7 +38,33 @@ public class LLMClient {
                 .build();
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        JSONObject json = new JSONObject(response.body());
 
-        System.out.println(response.body());
+        // Extract answer
+        String answer = json.getJSONArray("candidates")
+                .getJSONObject(0)
+                .getJSONObject("content")
+                .getJSONArray("parts")
+                .getJSONObject(0)
+                .getString("text");
+
+        // Extract token usage
+        JSONObject usage = json.getJSONObject("usageMetadata");
+        int inputTokens = usage.getInt("promptTokenCount");
+        int outputTokens = usage.getInt("candidatesTokenCount");
+        int totalTokens = usage.getInt("totalTokenCount");
+
+        // Calculate cost
+        double cost = (inputTokens / 1000.0 * INPUT_COST_PER_1K)
+                + (outputTokens / 1000.0 * OUTPUT_COST_PER_1K);
+
+        // Log everything
+        System.out.println("=== RESPONSE ===");
+        System.out.println(answer);
+        System.out.println("\n=== TOKEN USAGE ===");
+        System.out.printf("Input tokens  : %d%n", inputTokens);
+        System.out.printf("Output tokens : %d%n", outputTokens);
+        System.out.printf("Total tokens  : %d%n", totalTokens);
+        System.out.printf("Cost          : $%.6f%n", cost);
     }
 }
