@@ -13,6 +13,27 @@ public class LLMClient {
     private static final double INPUT_COST_PER_1K = 0.00015;
     private static final double OUTPUT_COST_PER_1K = 0.00060;
 
+    private static HttpResponse<String> callWithRetry(HttpClient client, HttpRequest request, int maxRetries) throws Exception {
+        int attempt = 0;
+        while (attempt < maxRetries) {
+            try {
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                // If rate limited, treat as failure
+                if (response.statusCode() == 429 || response.statusCode() >= 500) {
+                    throw new RuntimeException("API error: " + response.statusCode());
+                }
+                return response;
+            } catch (Exception e) {
+                attempt++;
+                if (attempt == maxRetries) throw e;
+                long waitTime = (long) Math.pow(2, attempt) * 1000;
+                System.out.printf("Attempt %d failed. Retrying in %d seconds...%n", attempt, waitTime / 1000);
+                Thread.sleep(waitTime);
+            }
+        }
+        throw new RuntimeException("All retries exhausted");
+    }
+
     public static void main(String[] args) throws Exception {
         Properties properties = new Properties();
         properties.load(LLMClient.class.getResourceAsStream("/application.properties"));
@@ -37,7 +58,8 @@ public class LLMClient {
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
 
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+//        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = callWithRetry(client, request, 3);
         JSONObject json = new JSONObject(response.body());
 
         // Extract answer
